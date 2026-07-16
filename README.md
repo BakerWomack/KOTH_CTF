@@ -14,6 +14,8 @@ Each container in this CTF environment includes King of the Hill themed user acc
 - **Fast-talking mechanics and massage therapists**
 - **Substitute teachers and violin prodigies**
 
+[Walkthrough](https://medium.com/@bakerwomack/king-of-the-hill-ctf-3150314ae63f)
+
 ## Installation
 
 1. Clone the git repo
