@@ -232,7 +232,7 @@ fi
 
 # Update the ovpn_env.sh file with the new configuration
 echo "Updating OpenVPN environment configuration..."
-cat > "./openvpn-server/ovpn_env.sh" << EOF
+cat > "$OVPN_DATA_DIR/ovpn_env.sh" << EOF
 declare -x OVPN_AUTH=
 declare -x OVPN_CIPHER=
 declare -x OVPN_CLIENT_TO_CLIENT=
@@ -250,11 +250,11 @@ declare -x OVPN_EXTRA_SERVER_CONFIG=()
 declare -x OVPN_FRAGMENT=
 declare -x OVPN_KEEPALIVE='10 60'
 declare -x OVPN_MTU=
-declare -x OVPN_NAT=0
+declare -x OVPN_NAT=1
 declare -x OVPN_PORT=$PORT
 declare -x OVPN_PROTO=udp
-declare -x OVPN_PUSH=()
-declare -x OVPN_ROUTES=([0]="192.168.254.0/24")
+declare -x OVPN_PUSH=([0]="route 172.20.0.0 255.255.0.0")
+declare -x OVPN_ROUTES=()
 declare -x OVPN_SERVER=10.8.0.0/24
 declare -x OVPN_SERVER_CN=localhost
 declare -x OVPN_SERVER_URL=udp://$PUBLIC_IP:$PORT
@@ -263,7 +263,7 @@ EOF
 
 # Update the OpenVPN server configuration
 echo "Updating OpenVPN server configuration..."
-cat > "./openvpn-server/openvpn.conf" << EOF
+cat > "$OVPN_DATA_DIR/openvpn.conf" << EOF
 server 10.8.0.0 255.255.255.0
 verb 3
 key /etc/openvpn/pki/private/$PUBLIC_IP.key
@@ -286,14 +286,17 @@ group nogroup
 comp-lzo no
 
 ### Route Configurations Below
-route 192.168.254.0 255.255.255.0
+# CTF machines are on 172.20.0.0/16, directly connected to this container via
+# eth0 and reached by masquerade (OVPN_NAT=1), so no server-side route needed.
 
 ### Push Configurations Below
 push "block-outside-dns"
 push "dhcp-option DNS 8.8.8.8"
 push "dhcp-option DNS 8.8.4.4"
 push "comp-lzo no"
-push "redirect-gateway def1 bypass-dhcp"
+# Route clients into the CTF network so they can reach challenge machines.
+# This does not depend on redirect-gateway applying on the client.
+push "route 172.20.0.0 255.255.0.0"
 EOF
 
 # Generate client certificates and configuration files
