@@ -93,11 +93,15 @@ mkdir "openvpn-server\openvpn-data"
 echo Initializing OpenVPN for %PUBLIC_IP%:%PORT%...
 
 REM Initialize OpenVPN
-docker run -v "%cd%\openvpn-server\openvpn-data:/etc/openvpn" --rm kylemanna/openvpn ovpn_genconfig -u udp://%PUBLIC_IP%:%PORT%
+docker run -v "%cd%\openvpn-server\openvpn-data:/etc/openvpn" --rm kylemanna/openvpn ovpn_genconfig -u udp://%PUBLIC_IP%:%PORT% -s 10.8.0.0/24 -N -d -p "route 172.20.0.0 255.255.0.0"
 if errorlevel 1 (
     echo Error: Failed to initialize OpenVPN configuration
     exit /b 1
 )
+
+REM OpenVPN 2.6+ with DCO rejects any compression directive; strip comp-lzo
+REM so modern clients don't fail with "compression ... is not allowed".
+docker run -v "%cd%\openvpn-server\openvpn-data:/etc/openvpn" --rm --entrypoint sh kylemanna/openvpn -c "sed -i '/comp-lzo/d;/compress/d' /etc/openvpn/openvpn.conf"
 
 REM Generate CA
 echo Generating certificate authority...
@@ -144,7 +148,9 @@ echo OpenVPN Installation Script for Windows
 echo Usage: %0 -i [IP] -c [count] [-p [port]] [-o [output_dir]]
 echo.
 echo Required:
-echo   -i [IP]       Public IP address (use 10.8.0.1 for VPN network)
+echo   -i [IP]       Address clients connect to (the .ovpn "remote" line):
+echo                 your server's public IP (with 1194/udp forwarded) or LAN IP;
+echo                 127.0.0.1 only for local single-host use. NOT 10.8.0.1.
 echo   -c [count]    Number of client configs
 echo.
 echo Optional:
@@ -152,7 +158,7 @@ echo   -p [port]     Port (default: 1194)
 echo   -o [dir]      Output directory (default: .\client_configs)
 echo   -h            Show this help
 echo.
-echo Example: %0 -i 10.8.0.1 -c 5
+echo Example: %0 -i 203.0.113.10 -c 5
 echo.
 
 :end

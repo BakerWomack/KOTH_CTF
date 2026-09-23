@@ -45,7 +45,9 @@ usage() {
     echo "Usage: $0 -i <public_ip> -c <client_count> [-p <port>] [-o <output_dir>] [-d <docker_compose_file>]"
     echo ""
     echo "Required options:"
-    echo "  -i <public_ip>         Public IP address for the OpenVPN server (use 10.8.0.1 for VPN network)"
+    echo "  -i <ip>                Address clients connect to (goes in the .ovpn 'remote' line):"
+    echo "                         your server's public IP (with 1194/udp forwarded) or LAN IP;"
+    echo "                         127.0.0.1 only for local single-host use. NOT 10.8.0.1."
     echo "  -c <client_count>      Number of client configuration files to generate"
     echo ""
     echo "Optional options:"
@@ -54,8 +56,10 @@ usage() {
     echo "  -d <docker_compose>    Docker compose file path (default: ./docker-compose.yml)"
     echo "  -h                     Show this help message"
     echo ""
-    echo "Example:"
-    echo "  $0 -i 127.0.0.1 -c 5 -p 1194 -o ./configs"
+    echo "Example (server reachable at 203.0.113.10):"
+    echo "  $0 -i 203.0.113.10 -c 5 -p 1194 -o ./configs"
+    echo "Example (local single-host testing):"
+    echo "  $0 -i 127.0.0.1 -c 5"
     echo ""
     echo "Supported platforms: Linux, macOS, Windows (Git Bash/WSL)"
     echo "Current OS detected: $OS"
@@ -212,12 +216,31 @@ echo "Initializing OpenVPN configuration for $PUBLIC_IP:$PORT..."
 CURRENT_DIR="$(pwd)"
 
 # Initialize the OpenVPN configuration
+# -s 10.8.0.0/24 : VPN client subnet (matches the return routes the CTF
+#                  containers add via the openvpn server in their start.sh)
+# -N            : NAT client traffic onto the CTF network (172.20.0.0/16)
+# -d            : do NOT push a full-tunnel default route (don't hijack the
+#                 client's internet; only route the CTF network)
+# -p route ...  : push an explicit route into the CTF network so clients can
+#                 reach challenge machines regardless of redirect-gateway
+GENCONFIG_ARGS="-u udp://$PUBLIC_IP:$PORT -s 10.8.0.0/24 -N -d -p \"route 172.20.0.0 255.255.0.0\""
 if [[ "$OS" == "Windows" ]]; then
     # Windows Docker volume mounting
-    docker run -v "$CURRENT_DIR/$OVPN_DATA_DIR:/etc/openvpn" --rm kylemanna/openvpn ovpn_genconfig -u udp://$PUBLIC_IP:$PORT
+    eval docker run -v "\"$CURRENT_DIR/$OVPN_DATA_DIR:/etc/openvpn\"" --rm kylemanna/openvpn ovpn_genconfig $GENCONFIG_ARGS
 else
     # Linux/Mac Docker volume mounting
-    docker run -v "$PWD/$OVPN_DATA_DIR:/etc/openvpn" --rm kylemanna/openvpn ovpn_genconfig -u udp://$PUBLIC_IP:$PORT
+    eval docker run -v "\"$PWD/$OVPN_DATA_DIR:/etc/openvpn\"" --rm kylemanna/openvpn ovpn_genconfig $GENCONFIG_ARGS
+fi
+
+# OpenVPN 2.6+ with Data Channel Offload (DCO) refuses ANY compression
+# directive and aborts the connection ("compression ... is not allowed since
+# data-channel offloading is enabled"). The kylemanna image always writes
+# comp-lzo, so strip every compression line from the generated server config.
+# Run the edit inside the container since the file is root-owned.
+if [[ "$OS" == "Windows" ]]; then
+    docker run -v "$CURRENT_DIR/$OVPN_DATA_DIR:/etc/openvpn" --rm --entrypoint sh kylemanna/openvpn -c "sed -i '/comp-lzo/d;/compress/d' /etc/openvpn/openvpn.conf"
+else
+    docker run -v "$PWD/$OVPN_DATA_DIR:/etc/openvpn" --rm --entrypoint sh kylemanna/openvpn -c "sed -i '/comp-lzo/d;/compress/d' /etc/openvpn/openvpn.conf"
 fi
 
 # Generate the certificate authority
@@ -230,74 +253,11 @@ else
     echo -e "\n\n\n\n\n\n\n" | docker run -v "$PWD/$OVPN_DATA_DIR:/etc/openvpn" --rm -i kylemanna/openvpn ovpn_initpki nopass
 fi
 
-# Update the ovpn_env.sh file with the new configuration
-echo "Updating OpenVPN environment configuration..."
-cat > "$OVPN_DATA_DIR/ovpn_env.sh" << EOF
-declare -x OVPN_AUTH=
-declare -x OVPN_CIPHER=
-declare -x OVPN_CLIENT_TO_CLIENT=
-declare -x OVPN_CN=$PUBLIC_IP
-declare -x OVPN_COMP_LZO=0
-declare -x OVPN_DEFROUTE=1
-declare -x OVPN_DEVICE=tun
-declare -x OVPN_DEVICEN=0
-declare -x OVPN_DISABLE_PUSH_BLOCK_DNS=0
-declare -x OVPN_DNS=1
-declare -x OVPN_DNS_SERVERS=([0]="8.8.8.8" [1]="8.8.4.4")
-declare -x OVPN_ENV=/etc/openvpn/ovpn_env.sh
-declare -x OVPN_EXTRA_CLIENT_CONFIG=()
-declare -x OVPN_EXTRA_SERVER_CONFIG=()
-declare -x OVPN_FRAGMENT=
-declare -x OVPN_KEEPALIVE='10 60'
-declare -x OVPN_MTU=
-declare -x OVPN_NAT=1
-declare -x OVPN_PORT=$PORT
-declare -x OVPN_PROTO=udp
-declare -x OVPN_PUSH=([0]="route 172.20.0.0 255.255.0.0")
-declare -x OVPN_ROUTES=()
-declare -x OVPN_SERVER=10.8.0.0/24
-declare -x OVPN_SERVER_CN=localhost
-declare -x OVPN_SERVER_URL=udp://$PUBLIC_IP:$PORT
-declare -x OVPN_TLS_CIPHER=
-EOF
-
-# Update the OpenVPN server configuration
-echo "Updating OpenVPN server configuration..."
-cat > "$OVPN_DATA_DIR/openvpn.conf" << EOF
-server 10.8.0.0 255.255.255.0
-verb 3
-key /etc/openvpn/pki/private/$PUBLIC_IP.key
-ca /etc/openvpn/pki/ca.crt
-cert /etc/openvpn/pki/issued/$PUBLIC_IP.crt
-dh /etc/openvpn/pki/dh.pem
-tls-auth /etc/openvpn/pki/ta.key
-key-direction 0
-keepalive 10 60
-persist-key
-persist-tun
-
-proto udp
-port $PORT
-dev tun0
-status /tmp/openvpn-status.log
-
-user nobody
-group nogroup
-comp-lzo no
-
-### Route Configurations Below
-# CTF machines are on 172.20.0.0/16, directly connected to this container via
-# eth0 and reached by masquerade (OVPN_NAT=1), so no server-side route needed.
-
-### Push Configurations Below
-push "block-outside-dns"
-push "dhcp-option DNS 8.8.8.8"
-push "dhcp-option DNS 8.8.4.4"
-push "comp-lzo no"
-# Route clients into the CTF network so they can reach challenge machines.
-# This does not depend on redirect-gateway applying on the client.
-push "route 172.20.0.0 255.255.0.0"
-EOF
+# ovpn_genconfig (above) already wrote a correct ovpn_env.sh and openvpn.conf
+# into $OVPN_DATA_DIR, with the remote set to the -i address, NAT enabled, and
+# the CTF route pushed. No hand-written overrides needed here -- doing so was
+# the original bug (the override was written to a path the container never
+# mounted, so it silently had no effect).
 
 # Generate client certificates and configuration files
 echo "Generating $CLIENT_COUNT client configuration files..."
@@ -325,9 +285,6 @@ for i in $(seq 1 $CLIENT_COUNT); do
     echo "✓ Generated $CLIENT_NAME.ovpn"
 done
 
-# Copy OpenVPN data to the server directory
-echo "Copying OpenVPN data to server directory..."
-cp -r "$OVPN_DATA_DIR"/* "./openvpn-server/openvpn-data/" 2>/dev/null || true
 
 echo ""
 echo "=== Configuration Complete ==="

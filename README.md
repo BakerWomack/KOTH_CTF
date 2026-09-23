@@ -53,7 +53,11 @@ OpenVPN Installation Script
 Usage: install_openvpn.bat -i [IP] -c [count] [-p [port]] [-o [output_dir]]
 
 Required:
-  -i [IP]       Public IP address (use 10.8.0.1 for VPN network)
+  -i [IP]       The address clients connect to = what goes in the .ovpn
+                "remote" line. Use your server's public IP (with 1194/udp
+                port-forwarded) or its LAN IP. Use 127.0.0.1 only for a
+                purely local, single-host setup. Do NOT use 10.8.0.1 (that
+                is the VPN's internal gateway, not a reachable endpoint).
   -c [count]    Number of client configs
 
 Optional:
@@ -61,7 +65,7 @@ Optional:
   -o [dir]      Output directory (default: .\client_configs)
   -h            Show this help
 
-Example: install_openvpn.bat -i 10.8.0.1 -c 5
+Example: install_openvpn.bat -i 203.0.113.10 -c 5
 ```
 
 3. Connect to the VPN:
