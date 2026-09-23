@@ -105,9 +105,7 @@ services:
       context: ./scoreboard
       dockerfile: Dockerfile
     ports:
-      # README documents the scoreboard at http://localhost:5000; the app binds
-      # 8000 internally. (Host 8000 is also already used by jitsi on this box.)
-      - "5000:8000"
+      - "8000:8000"
     volumes:
       - ./scoreboard/data:/app/data
       - ./scoreboard/flags.txt:/app/flags.txt
